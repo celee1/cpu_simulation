@@ -1,89 +1,54 @@
 class CPU:
     def __init__(self):
-        self.registers = [0] * 32  # 32 general-purpose registers
-        self.pc = 0  # Program counter
-        self.memory = [0] * 1024  # Simplified memory
-        self.cache_enabled = True
-    
-    def fetch_instruction(self, instructions):
-        if self.pc < len(instructions):
-            return instructions[self.pc]
-        return "HALT"
-    
-    def execute_instruction(self, instruction):
-        parts = instruction.split()
-        op = parts[0]
-        
-        if op == "ADD":
-            rd, rs, rt = map(int, parts[1:])
-            self.registers[rd] = self.registers[rs] + self.registers[rt]
-            print(f"Result: {self.registers[rd]}")
-        elif op == "ADDI":
-            rt, rs, immd = map(int, parts[1:])
-            self.registers[rt] = self.registers[rs] + immd
-            print(f"Result: {self.registers[rt]}")
-        elif op == "SUB":
-            rd, rs, rt = map(int, parts[1:])
-            self.registers[rd] = self.registers[rs] - self.registers[rt]
-            print(f"Result: {self.registers[rd]}")
-        elif op == "SLT":
-            rd, rs, rt = map(int, parts[1:])
-            self.registers[rd] = 1 if self.registers[rs] < self.registers[rt] else 0
-            print(f"Result: {self.registers[rd]}")
-        elif op == "BNE":
-            rs, rt, offset = map(int, parts[1:])
-            if self.registers[rs] != self.registers[rt]:
-                self.pc += offset
-        elif op == "J":
-            target = int(parts[1])
-            self.pc = target
-        elif op == "JAL":
-            target = int(parts[1])
-            self.registers[7] = self.pc + 1
-            self.pc = target
-        elif op == "LW":
-            rt, offset, rs = map(int, parts[1:])
-            self.registers[rt] = self.memory[self.registers[rs] + offset]
-            print(f"Loaded: {self.registers[rt]}")
-        elif op == "SW":
-            rt, offset, rs = map(int, parts[1:])
-            self.memory[self.registers[rs] + offset] = self.registers[rt]
-            print(f"Stored: {self.registers[rt]}")
-        elif op == "CACHE":
-            code = int(parts[1])
-            if code == 0:
-                self.cache_enabled = False
-            elif code == 1:
-                self.cache_enabled = True
-            elif code == 2:
-                print("Cache flushed")
-        elif op == "HALT":
-            print("Execution halted.")
-            return False
-        
-        self.pc += 1  # Increment PC unless changed by branch/jump
-        return True
-    
-    def run(self, instructions):
-        running = True
-        while running:
-            instr = self.fetch_instruction(instructions)
-            print(f"Executing: {instr}")
-            running = self.execute_instruction(instr)
+        self.registers = {f"${i}": 0 for i in range(32)}  # 32 general-purpose registers
+        self.memory = {}  # Memory dictionary (address -> value)
+        self.pc = 0  # Program Counter
 
-# Example usage
-if __name__ == "__main__":
-    cpu = CPU()
-    instruction_list = [
-        "ADDI 1 0 10",  # R1 = R0 + 10
-        "ADDI 2 0 5",   # R2 = R0 + 5
-        "ADD 3 1 2",    # R3 = R1 + R2
-        "SUB 4 3 2",    # R4 = R1 - R2
-        "SLT 5 2 3",    # R5 = 1 if R2 < R3 else 0
-        "BNE 1 2 2",    # If R1 != R2, skip next instruction
-        "J 6",          # Jump to instruction at index 6
-        "CACHE 2",      # Flush cache
-        "HALT"
-    ]
-    cpu.run(instruction_list)
-    
+        # Instruction Set using Lambda Functions
+        self.instruction_set = {
+            "ADD": lambda rd, rs, rt: self.registers.update({rd: self.registers[rs] + self.registers[rt]}),
+            "ADDI": lambda rt, rs, imm: self.registers.update({rt: self.registers[rs] + imm}),
+            "SUB": lambda rd, rs, rt: self.registers.update({rd: self.registers[rs] - self.registers[rt]}),
+            "MULT": lambda rs, rt: self.registers.update({"HI": self.registers[rs] * self.registers[rt] // (2**32),
+                                                           "LO": self.registers[rs] * self.registers[rt] % (2**32)}),
+            "DIV": lambda rs, rt: self.registers.update({"LO": self.registers[rs] // self.registers[rt], 
+                                                         "HI": self.registers[rs] % self.registers[rt]}),
+            "AND": lambda rd, rs, rt: self.registers.update({rd: self.registers[rs] & self.registers[rt]}),
+            "OR": lambda rd, rs, rt: self.registers.update({rd: self.registers[rs] | self.registers[rt]}),
+            "XOR": lambda rd, rs, rt: self.registers.update({rd: self.registers[rs] ^ self.registers[rt]}),
+            "NOR": lambda rd, rs, rt: self.registers.update({rd: ~(self.registers[rs] | self.registers[rt])}),
+            "SLL": lambda rd, rt, shamt: self.registers.update({rd: self.registers[rt] << shamt}),
+            "SRL": lambda rd, rt, shamt: self.registers.update({rd: self.registers[rt] >> shamt}),
+            "LW": lambda rt, offset, rs: self.registers.update({rt: self.memory.get(self.registers[rs] + offset, 0)}),
+            "SW": lambda rt, offset, rs: self.memory.update({self.registers[rs] + offset: self.registers[rt]}),
+            "BNE": lambda rs, rt, offset: setattr(self, 'pc', self.pc + offset if self.registers[rs] != self.registers[rt] else self.pc),
+            "BEQ": lambda rs, rt, offset: setattr(self, 'pc', self.pc + offset if self.registers[rs] == self.registers[rt] else self.pc),
+            "BGTZ": lambda rs, offset: setattr(self, 'pc', self.pc + offset if self.registers[rs] > 0 else self.pc),
+            "BLEZ": lambda rs, offset: setattr(self, 'pc', self.pc + offset if self.registers[rs] <= 0 else self.pc),
+            "J": lambda target: setattr(self, 'pc', target),
+            "JAL": lambda target: (self.registers.update({"$ra": self.pc}), setattr(self, 'pc', target)),
+            "CACHE": lambda mode: print(f"Cache {'enabled' if mode else 'disabled'}"),
+            "HALT": lambda: setattr(self, 'pc', -1)  # Halt sets pc to -1
+        }
+
+    def run(self, instructions):
+        """ Executes a list of instructions. """
+        while self.pc < len(instructions) and self.pc != -1:
+            instr = instructions[self.pc].split()
+            opcode = instr[0]
+            args = [int(x) if x.isdigit() else x for x in instr[1:]]  # Convert numbers, keep register names
+            if opcode in self.instruction_set:
+                self.instruction_set[opcode](*args)
+            self.pc += 1  # Increment PC unless modified by branch/jump
+
+# Example Usage
+cpu = CPU()
+instructions = [
+    "ADDI $t1 $t0 5",
+    "ADD $t2 $t1 $t0",
+    "SW $t2 4($t3)",
+    "LW $t4 4($t3)",
+    "BNE $t4 $t2 2",
+    "HALT"
+]
+cpu.run(instructions)
